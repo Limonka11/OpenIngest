@@ -59,6 +59,7 @@ dependencies = [
     # Pins to resolve transitive conflicts
     "protobuf>=6.33.5,<7.0",
     "pytest>=9.0.3",
+    "chardet>=7.4.3",
 ]
 
 [dependencies]
