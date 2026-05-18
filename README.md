@@ -164,6 +164,10 @@ For structured extraction (works in both modes):
 python examples/extract_structured.py --file invoice.pdf --schema Invoice --local
 ```
 
+Once deployed, you can view and inspect job runs in the Tensorlake UI:
+
+https://github.com/user-attachments/assets/17c7e834-b0a1-43af-abff-6e8aa64203ae
+
 See [`docs/running.md`](docs/running.md) for the full walkthrough — per-backend key
 matrix, VLM/structured-extraction/page-classification examples, and the
 `ParseRequest` knobs that toggle each DAG stage.
