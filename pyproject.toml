@@ -58,6 +58,7 @@ dependencies = [
     "cryptography==46.0.7",
     # Pins to resolve transitive conflicts
     "protobuf>=6.33.5,<7.0",
+    "pytest>=9.0.3",
 ]
 
 [dependencies]
