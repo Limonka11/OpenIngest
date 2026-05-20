@@ -1444,4 +1444,3 @@ class StructuredExtraction:
         print(f"✅ Structured extraction completed in {extraction_time:.2f}s")
 
         return format_final_output(result)
-

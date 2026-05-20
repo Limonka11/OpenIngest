@@ -97,4 +97,3 @@ def split_schema(schema: Dict[str, Any], max_fields: int = 100) -> List[Dict[str
         chunks.append(current_chunk)
 
     return chunks
-
