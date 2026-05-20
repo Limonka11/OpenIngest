@@ -98,39 +98,3 @@ def split_schema(schema: Dict[str, Any], max_fields: int = 100) -> List[Dict[str
 
     return chunks
 
-
-if __name__ == "__main__":
-
-    simple_schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "Name of the insured"},
-            "address": {"type": "string", "description": "Address of the insured"},
-        },
-    }
-
-    test_schema = simple_schema  # copy a large schema here to test; keeping the simple schema here to keep the code clean
-
-    schemas = split_schema(test_schema, max_fields=100)
-    print(f"Split into {len(schemas)} chunks")
-
-    for i, schema in enumerate(schemas):
-        print(f"Chunk {i+1}:")
-        field_count = count_fields(schema)
-        prop_count = len(schema["properties"])
-        utilization = (field_count / 100) * 100
-        props = list(schema["properties"].keys())
-        print(f"  {field_count} fields, {prop_count} properties ({utilization:.1f}% utilization)")
-        print(f"  Properties: {props}")
-        print(f"\n  Chunk {i+1} Schema JSON:")
-        # print(json.dumps(schema, indent=2))
-        print("\n" + "-" * 80 + "\n")
-
-    print("Property field counts:")
-    property_fields = {}
-    for prop_name, prop_schema in test_schema["properties"].items():
-        property_fields[prop_name] = count_fields(prop_schema) + 1
-
-    sorted_props = sorted(property_fields.items(), key=lambda x: x[1], reverse=True)
-    for prop_name, field_count in sorted_props:
-        print(f"  {prop_name}: {field_count} fields")
