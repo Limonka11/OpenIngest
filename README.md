@@ -132,6 +132,19 @@ export GEMINI_API_KEY=...
 python examples/parse_pdf.py --file my.pdf --ocr-model gemini --local
 ```
 
+#### Installing with uv
+
+```bash
+git clone https://github.com/tensorlakeai/openingest
+cd openingest
+uv sync --extra cpu      # CPU machine (installs torch + transformers)
+# uv sync --extra gpu    # Linux GPU machine (installs CUDA torch + transformers)
+# pip install vllm       # additionally required for dots-ocr on a GPU machine
+
+export GEMINI_API_KEY=...
+python examples/parse_pdf.py --file my.pdf --ocr-model gemini --local
+```
+
 Results are written to debug/
 
 Add `--draw-bboxes` to also write `debug/bbox_page_N.png` per page, with fragment bounding boxes overlayed on the rendered page image — handy for sanity-checking layout output. Local files only.

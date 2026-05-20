@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for textract_markdown_extractor — pure helpers.
+"""Tests for textract_markdown_extractor.
 
-The `TextractMarkdownExtractor` class constructor instantiates a real
-`Textractor` (boto3 under the hood), so we focus tests on the standalone
-`_create_fragment_from_layout` function which has no external dependencies.
+Covers the pure `_create_fragment_from_layout` helper and the
+`TextractMarkdownExtractor` class with the AWS Textractor mocked out.
 """
 
+import io
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pytest
+from PIL import Image
 
 from tensorlake_docai.ocr.textract_markdown_extractor import _create_fragment_from_layout
 
@@ -178,3 +182,135 @@ def test_create_fragment_returns_none_on_internal_failure():
 
     out = _create_fragment_from_layout(Bad(), reading_order=0, image_width=100, image_height=100)
     assert out is None
+
+
+# ==========================================================================
+# TextractMarkdownExtractor  (mocked Textractor / AWS)
+# ==========================================================================
+
+
+def _make_layout_obj(layout_type="LAYOUT_TEXT", text="hello"):
+    bbox = SimpleNamespace(x=0.0, y=0.0, width=0.5, height=0.1)
+    obj = SimpleNamespace(layout_type=layout_type, bbox=bbox, text=text)
+    obj.to_markdown = lambda: text
+    obj.to_html = lambda: f"<p>{text}</p>"
+    return obj
+
+
+def _make_mock_extractor():
+    with patch("tensorlake_docai.ocr.textract_markdown_extractor.Textractor") as mock_cls:
+        mock_cls.return_value = MagicMock()
+        from tensorlake_docai.ocr.textract_markdown_extractor import TextractMarkdownExtractor
+
+        return TextractMarkdownExtractor(region_name="us-east-1")
+
+
+_tme = _make_mock_extractor()
+
+
+# --- __init__ ----------------------------------------------------------------
+
+
+def test_init_success():
+    extractor = _make_mock_extractor()
+    assert extractor.region_name == "us-east-1"
+
+
+def test_init_failure_raises():
+    with patch("tensorlake_docai.ocr.textract_markdown_extractor.Textractor") as mock_cls:
+        mock_cls.side_effect = Exception("connection refused")
+        from tensorlake_docai.ocr.textract_markdown_extractor import TextractMarkdownExtractor
+
+        with pytest.raises(Exception, match="Failed to initialize"):
+            TextractMarkdownExtractor()
+
+
+# --- extract_page_layout_from_textract_result --------------------------------
+
+
+def test_extract_page_layout_passthrough():
+    data = {"dimensions": [612, 792], "page_fragments": [{"type": "text"}]}
+    result = _tme.extract_page_layout_from_textract_result(data)
+    assert result is data
+
+
+def test_extract_page_layout_missing_key_returns_defaults():
+    data = {"other": "stuff"}
+    result = _tme.extract_page_layout_from_textract_result(data)
+    assert result["dimensions"] == [612, 792]
+    assert result["page_fragments"] == []
+
+
+# --- process_image -----------------------------------------------------------
+
+
+def _mock_document(layouts=None):
+    page = SimpleNamespace(layouts=layouts or [])
+    return SimpleNamespace(pages=[page])
+
+
+def test_process_image_pil():
+    with patch(
+        "tensorlake_docai.ocr.textract_markdown_extractor.robust_textract_analyze_document",
+        return_value=_mock_document([_make_layout_obj("LAYOUT_TEXT", "Hello")]),
+    ):
+        _tme.extractor = MagicMock()
+        result = _tme.process_image(Image.new("RGB", (100, 200)))
+
+    assert result["dimensions"] == [100, 200]
+    assert len(result["page_fragments"]) == 1
+    assert result["page_fragments"][0]["fragment_type"] == "text"
+
+
+def test_process_image_bytes():
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 80)).save(buf, format="PNG")
+    with patch(
+        "tensorlake_docai.ocr.textract_markdown_extractor.robust_textract_analyze_document",
+        return_value=_mock_document([]),
+    ):
+        _tme.extractor = MagicMock()
+        result = _tme.process_image(buf.getvalue())
+
+    assert result["page_fragments"] == []
+    assert result["dimensions"] == [50, 80]
+
+
+def test_process_image_rgba_converted():
+    with patch(
+        "tensorlake_docai.ocr.textract_markdown_extractor.robust_textract_analyze_document",
+        return_value=_mock_document([]),
+    ):
+        _tme.extractor = MagicMock()
+        result = _tme.process_image(Image.new("RGBA", (10, 10), (0, 0, 0, 128)))
+
+    assert "page_fragments" in result
+
+
+def test_process_image_empty_pages():
+    with patch(
+        "tensorlake_docai.ocr.textract_markdown_extractor.robust_textract_analyze_document",
+        return_value=SimpleNamespace(pages=[]),
+    ):
+        _tme.extractor = MagicMock()
+        result = _tme.process_image(Image.new("RGB", (10, 10)))
+
+    assert result["page_fragments"] == []
+
+
+def test_process_image_unsupported_type_raises():
+    with pytest.raises(Exception):
+        _tme.process_image(42)
+
+
+def test_process_image_bytes_convenience():
+    buf = io.BytesIO()
+    Image.new("RGB", (20, 30)).save(buf, format="PNG")
+    with patch(
+        "tensorlake_docai.ocr.textract_markdown_extractor.robust_textract_analyze_document",
+        return_value=_mock_document([]),
+    ):
+        _tme.extractor = MagicMock()
+        result = _tme.process_image_bytes(buf.getvalue())
+
+    assert result["dimensions"] == [20, 30]

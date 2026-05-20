@@ -23,7 +23,7 @@ classifiers = [
 
 dependencies = [
     "tensorlake",
-    "huggingface_hub",
+    "huggingface-hub",
     # LLM / VLM providers
     "openai==2.3.0",
     "anthropic==0.74.1",
@@ -61,10 +61,14 @@ dependencies = [
     "pytest>=9.0.3",
     "chardet>=7.4.3",
     "python-docx>=1.2.0",
+    "pdf2image>=1.17.0",
+    "pytest-cov>=7.1.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-mock", "ruff", "black"]
+cpu = ["torch", "transformers"]
+gpu = ["torch", "transformers"]
 
 [project.urls]
 Homepage = "https://github.com/tensorlakeai/openingest"
@@ -77,6 +81,13 @@ include = ["tensorlake_docai*"]
 [tool.setuptools.package-data]
 tensorlake_docai = ["py.typed"]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    # PyMuPDF (fitz) uses SWIG C bindings that emit these on import in Python 3.12+
+    "ignore:builtin type SwigPy:DeprecationWarning",
+    "ignore:builtin type swigvarlink:DeprecationWarning",
+]
+
 [tool.black]
 line-length = 100
 target-version = ["py312"]
@@ -87,3 +98,18 @@ target-version = "py312"
 
 [tool.uv.extra-build-variables.cryptography]
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY = "1"
+
+[tool.uv]
+conflicts = [
+    [{ extra = "cpu" }, { extra = "gpu" }],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", extra = "gpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true

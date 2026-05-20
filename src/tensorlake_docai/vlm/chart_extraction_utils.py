@@ -11,7 +11,7 @@ from tensorlake_docai.models.intermediate_objects import ParseResult
 
 
 async def run_element_chart_extraction_and_modify_page_elements(
-    cropped_images: List[Image],
+    cropped_images: List[Image.Image],
     page_elements: List[PageLayoutElement],
     element_types: Optional[List[PageFragmentType]] = None,
     element_types_to_check: Optional[List[PageFragmentType]] = None,

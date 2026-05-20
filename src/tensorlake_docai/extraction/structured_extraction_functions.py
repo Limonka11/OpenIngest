@@ -23,7 +23,7 @@ from tensorlake_docai.providers.model_provider_utils import (
 )
 from tensorlake_docai.extraction.openai_schema_enricher import pydantic_converter
 from tensorlake_docai.pipeline.output_formatter import format_final_output
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from tensorlake_docai.extraction.schema_chunker import split_schema
 from tensorlake_docai.extraction.citation_handler import StructuredExtractionCitationHandler
 from tensorlake_docai.extraction.tabular_content_splitter import (

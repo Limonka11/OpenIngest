@@ -64,7 +64,7 @@ async def _make_gemini_call_fast(*args, **kwargs):
 
 
 async def run_element_table_cell_grounding_and_modify_page_elements(
-    cropped_images: List[Image],
+    cropped_images: List[Image.Image],
     page_elements: List[PageLayoutElement],
     element_types: Optional[List[PageFragmentType]] = None,
     element_types_to_check: Optional[List[PageFragmentType]] = None,

@@ -2,14 +2,53 @@
 """HTML/string utilities used during cross-page table merging."""
 
 from tensorlake_docai.tables.table_merging import (
+    _is_vertically_aligned,
+    are_tables_semantically_aligned,
     extract_json_from_response,
+    get_cross_page_table_candidates,
+    get_cross_page_tables,
+    get_first_table,
+    get_last_table,
     get_table_column_count,
     get_table_column_types,
+    get_tables_from_page_start,
     infer_cell_type,
     merge_table_htmls,
     remove_header_rows_regex,
     slice_table_rows,
 )
+from tensorlake_docai.pipeline.api import (
+    Page,
+    PageFragment,
+    PageFragmentType,
+    Table,
+    Text,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_table_fragment(html: str = "<table></table>", bbox=None) -> PageFragment:
+    return PageFragment(
+        fragment_type=PageFragmentType.TABLE,
+        content=Table(content="", cells=[], html=html),
+        bbox=bbox,
+    )
+
+
+def _make_text_fragment() -> PageFragment:
+    return PageFragment(
+        fragment_type=PageFragmentType.TEXT,
+        content=Text(content="Some text"),
+    )
+
+
+def _make_page(number: int, fragments=None) -> Page:
+    return Page(page_number=number, page_fragments=fragments or [])
+
 
 # --- merge_table_htmls ----------------------------------------------------
 
@@ -138,3 +177,163 @@ def test_get_table_column_types_detects_numeric_data_without_headers():
         "number",
         "number",
     ]
+
+
+def test_get_table_column_types_from_end():
+    html = (
+        "<table>"
+        "<tr><td>Name</td><td>Score</td></tr>"
+        "<tr><td>Alice</td><td>95</td></tr>"
+        "<tr><td>Bob</td><td>88</td></tr>"
+        "</table>"
+    )
+    types = get_table_column_types(html, rows_to_check=2, from_start=False)
+    assert types == ["text", "number"]
+
+
+def test_get_table_column_types_empty_table():
+    assert get_table_column_types("<table></table>") == []
+
+
+# --- get_last_table / get_first_table ------------------------------------
+
+
+def test_get_last_table_returns_last():
+    t1 = _make_table_fragment("<table>1</table>")
+    t2 = _make_table_fragment("<table>2</table>")
+    txt = _make_text_fragment()
+    fragments = [t1, txt, t2]
+    result = get_last_table(fragments)
+    assert result is t2
+
+
+def test_get_last_table_no_table_returns_none():
+    assert get_last_table([_make_text_fragment()]) is None
+
+
+def test_get_last_table_empty_list_returns_none():
+    assert get_last_table([]) is None
+
+
+def test_get_first_table_returns_first():
+    t1 = _make_table_fragment("<table>1</table>")
+    t2 = _make_table_fragment("<table>2</table>")
+    result = get_first_table([_make_text_fragment(), t1, t2])
+    assert result is t1
+
+
+def test_get_first_table_no_table_returns_none():
+    assert get_first_table([_make_text_fragment()]) is None
+
+
+# --- get_cross_page_tables -----------------------------------------------
+
+
+def test_get_cross_page_tables_finds_pair():
+    t_end = _make_table_fragment("<table>end</table>")
+    t_start = _make_table_fragment("<table>start</table>")
+    pages = [
+        _make_page(1, [_make_text_fragment(), t_end]),
+        _make_page(2, [t_start, _make_text_fragment()]),
+    ]
+    end, start = get_cross_page_tables(pages, 0)
+    assert end is t_end
+    assert start is t_start
+
+
+def test_get_cross_page_tables_last_page_returns_none_pair():
+    pages = [_make_page(1, [_make_table_fragment()])]
+    end, start = get_cross_page_tables(pages, 0)
+    assert end is None
+    assert start is None
+
+
+def test_get_cross_page_tables_no_table_on_either_side():
+    pages = [
+        _make_page(1, [_make_text_fragment()]),
+        _make_page(2, [_make_text_fragment()]),
+    ]
+    end, start = get_cross_page_tables(pages, 0)
+    assert end is None
+    assert start is None
+
+
+# --- get_cross_page_table_candidates ------------------------------------
+
+
+def test_get_cross_page_table_candidates_returns_pairs():
+    t1 = _make_table_fragment()
+    t2 = _make_table_fragment()
+    pages = [
+        _make_page(1, [t1]),
+        _make_page(2, [t2]),
+    ]
+    candidates = get_cross_page_table_candidates(pages, 0)
+    assert len(candidates) == 1
+    assert candidates[0] == (t1, t2)
+
+
+def test_get_cross_page_table_candidates_last_page_returns_empty():
+    pages = [_make_page(1, [_make_table_fragment()])]
+    assert get_cross_page_table_candidates(pages, 0) == []
+
+
+# --- get_tables_from_page_start -----------------------------------------
+
+
+def test_get_tables_from_page_start_respects_limit():
+    frags = [_make_table_fragment() for _ in range(5)]
+    page = _make_page(1, frags)
+    result = get_tables_from_page_start(page, limit=3)
+    assert len(result) == 3
+
+
+def test_get_tables_from_page_start_skips_non_tables():
+    page = _make_page(1, [_make_text_fragment(), _make_table_fragment(), _make_text_fragment()])
+    result = get_tables_from_page_start(page, limit=5)
+    assert len(result) == 1
+
+
+# --- _is_vertically_aligned ---------------------------------------------
+
+
+def test_is_vertically_aligned_full_overlap():
+    b = {"x1": 0, "y1": 0, "x2": 100, "y2": 50}
+    f1 = _make_table_fragment(bbox=b)
+    f2 = _make_table_fragment(bbox=b)
+    assert _is_vertically_aligned(f1, f2)
+
+
+def test_is_vertically_aligned_no_overlap():
+    f1 = _make_table_fragment(bbox={"x1": 0, "y1": 0, "x2": 50, "y2": 10})
+    f2 = _make_table_fragment(bbox={"x1": 200, "y1": 20, "x2": 300, "y2": 30})
+    assert not _is_vertically_aligned(f1, f2)
+
+
+def test_is_vertically_aligned_no_bbox_returns_true():
+    f1 = _make_table_fragment()
+    f2 = _make_table_fragment()
+    assert _is_vertically_aligned(f1, f2)
+
+
+# --- are_tables_semantically_aligned ------------------------------------
+
+
+def test_are_tables_semantically_aligned_matching_types():
+    html = (
+        "<table>"
+        "<tr><td>Alice</td><td>100</td></tr>"
+        "<tr><td>Bob</td><td>200</td></tr>"
+        "</table>"
+    )
+    assert are_tables_semantically_aligned(html, html)
+
+
+def test_are_tables_semantically_aligned_different_column_counts():
+    html1 = "<table><tr><td>A</td><td>1</td></tr></table>"
+    html2 = "<table><tr><td>A</td><td>1</td><td>extra</td></tr></table>"
+    assert not are_tables_semantically_aligned(html1, html2)
+
+
+def test_are_tables_semantically_aligned_empty_returns_true():
+    assert are_tables_semantically_aligned("<table></table>", "<table></table>")
