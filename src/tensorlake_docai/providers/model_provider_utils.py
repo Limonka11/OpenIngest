@@ -24,14 +24,14 @@ OPENAI_VLM_MODEL_NAME = os.environ.get(
 
 
 def get_gemini_async_client_and_model(
-    api_key: Optional[str] = None, model_name: str = "gemini-3.1-flash-lite-preview"
+    api_key: Optional[str] = None, model_name: str = "gemini-3.1-flash-lite"
 ):
     """
     Return (async Gemini client (.aio), model_name).
 
     Args:
         api_key: Optional API key. If None, uses "GEMINI_API_KEY" from env.
-        model_name: Model name to use. Defaults to "gemini-3.1-flash-lite-preview".
+        model_name: Model name to use. Defaults to "gemini-3.1-flash-lite".
 
     Returns:
         Tuple of (client.aio, model_name)
@@ -145,7 +145,7 @@ async def _make_gemini_call(
     job_type=None,
     timeout: Optional[int] = None,
     pdf_bytes=None,
-    model_name: str = "gemini-3.1-flash-lite-preview",
+    model_name: str = "gemini-3.1-flash-lite",
     system_instruction=None,
     config_overrides=None,
 ):

@@ -19,7 +19,7 @@ from tensorlake_docai.pipeline.routing import route_after_ocr
 from tensorlake_docai.pipeline.simple_page_creator import SimplePageCreator
 from tensorlake_docai.extraction.form_extraction_utils import convert_form_json_to_markdown
 
-GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 PROVIDER_NAME = "GEMINI"
 
 PROMPT = (
