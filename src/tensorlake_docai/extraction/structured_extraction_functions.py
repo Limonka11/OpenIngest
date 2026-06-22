@@ -856,24 +856,28 @@ class StructuredExtraction:
                         SYSTEM_PROMPT, sonnet_prompt, json_schema
                     )
                 elif model_provider == "gemini":
-                    # Use the same prompt as Anthropic (no schema in prompt since we use response_json_schema)
-                    try:
-                        return await self._make_gemini_request(
-                            SYSTEM_PROMPT, sonnet_prompt, json_schema
-                        )
-                    except Exception as gemini_err:
-                        # Google's direct Gemini API can return 503/overloaded. If an
-                        # OpenRouter key is configured, fall back to the same model via
-                        # OpenRouter (different infra). `prompt` embeds the schema.
-                        if not os.environ.get("OPENROUTER_API_KEY"):
-                            raise
-                        print(
-                            f"Gemini direct failed ({type(gemini_err).__name__}); "
-                            "falling back to OpenRouter for gemini-3-flash"
-                        )
-                        return await self._make_openrouter_request(
-                            SYSTEM_PROMPT, prompt, json_schema
-                        )
+                    # Google's direct Gemini API key is heavily 503/quota-limited in
+                    # practice, while OpenRouter (same model) is reliable — so PREFER
+                    # OpenRouter when a key is configured (`prompt` embeds the schema),
+                    # and fall back to Gemini-direct if OpenRouter fails. Set
+                    # OPENROUTER_API_KEY="" to force Gemini-direct primary.
+                    if os.environ.get("OPENROUTER_API_KEY"):
+                        try:
+                            return await self._make_openrouter_request(
+                                SYSTEM_PROMPT, prompt, json_schema
+                            )
+                        except Exception as or_err:
+                            print(
+                                f"OpenRouter failed ({type(or_err).__name__}); "
+                                "falling back to Gemini direct"
+                            )
+                            return await self._make_gemini_request(
+                                SYSTEM_PROMPT, sonnet_prompt, json_schema
+                            )
+                    # No OpenRouter key: use Gemini direct (native response_json_schema).
+                    return await self._make_gemini_request(
+                        SYSTEM_PROMPT, sonnet_prompt, json_schema
+                    )
                 else:
                     print(f"Unknown model provider: {model_provider}")
                     raise RequestException(message=f"Unrecognized model provider: {model_provider}")
