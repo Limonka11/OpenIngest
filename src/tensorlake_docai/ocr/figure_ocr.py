@@ -42,8 +42,10 @@ from tensorlake_docai.extraction.structured_extraction_functions import Structur
 
 SECRETS: list[str] = []
 
-# GPU-specific config for Ovis
-OVIS_GPU_MEMORY_UTILIZATION = 0.85
+# GPU-specific config for Ovis.
+# Env-configurable: lowered default (0.4) so Ovis can co-reside with DotsOCR on ONE
+# GPU in single-process deployments (see dots_ocr.py). Only affects KV-cache size.
+OVIS_GPU_MEMORY_UTILIZATION = float(os.getenv("OVIS_GPU_MEMORY_UTILIZATION", "0.4"))
 OVIS_MEMORY_IN_GB = int(os.getenv("OVIS_MEMORY_IN_GB", "24"))  # Ovis needs less memory than DotsOCR
 GPU_MODELS = ["H100", "A100-80GB"]
 

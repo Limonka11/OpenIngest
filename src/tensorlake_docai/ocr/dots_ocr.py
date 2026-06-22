@@ -33,8 +33,12 @@ SECRETS = [
     "AZURE_OPENAI_MODEL_DEPLOYMENT_NAME",
 ]
 
-# GPU-specific config
-OCR_GPU_MEMORY_UTILIZATION = 0.85
+# GPU-specific config.
+# Env-configurable: when DotsOCR and Ovis figure-OCR run in the SAME process on ONE
+# GPU (e.g. a single-container run_local_application deployment) they cannot each take
+# 0.85 of VRAM. Lowered default (0.4) lets both vLLM engines co-reside on an 80GB GPU.
+# Only affects KV-cache size (throughput), not model output.
+OCR_GPU_MEMORY_UTILIZATION = float(os.getenv("OCR_GPU_MEMORY_UTILIZATION", "0.4"))
 MEMORY_IN_GB = int(os.getenv("OCR_GPU_MEMORY_IN_GB", "32"))
 GPU_MODELS = ["H100", "A100-80GB"]
 
