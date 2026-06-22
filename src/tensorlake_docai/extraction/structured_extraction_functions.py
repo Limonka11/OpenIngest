@@ -622,6 +622,45 @@ class StructuredExtraction:
         except Exception as e:
             self._handle_llm_error(e, "Gemini")
 
+    async def _make_openrouter_request(
+        self, system_prompt: str, user_prompt: str, json_schema: Optional[dict] = None
+    ) -> ModelResponse:
+        """Fallback path: run the same model via OpenRouter (OpenAI-compatible) when
+        Google's direct Gemini API is unavailable (503/overloaded). Uses JSON mode with
+        the schema embedded in the prompt (the caller passes the schema-bearing prompt),
+        so we avoid strict-schema conversion of complex schemas (oneOf, etc.)."""
+        import openai
+
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise Exception("OPENROUTER_API_KEY not set; cannot fall back to OpenRouter")
+        model_name = os.environ.get("OPENROUTER_GEMINI_MODEL", "google/gemini-3-flash-preview")
+        start_time = time.time()
+        client = openai.AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        try:
+            async with client:
+                resp = await client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                )
+            content = resp.choices[0].message.content or ""
+            print(f"OpenRouter fallback response time: {time.time() - start_time:.2f}s")
+            if not content:
+                raise Exception("OpenRouter returned empty response")
+            usage = getattr(resp, "usage", None)
+            return ModelResponse(
+                resp=json.loads(content),
+                input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            )
+        except Exception as e:
+            self._handle_llm_error(e, "OpenRouter")
+
     async def _make_openai_request(
         self,
         oai_client,
@@ -818,9 +857,23 @@ class StructuredExtraction:
                     )
                 elif model_provider == "gemini":
                     # Use the same prompt as Anthropic (no schema in prompt since we use response_json_schema)
-                    return await self._make_gemini_request(
-                        SYSTEM_PROMPT, sonnet_prompt, json_schema
-                    )
+                    try:
+                        return await self._make_gemini_request(
+                            SYSTEM_PROMPT, sonnet_prompt, json_schema
+                        )
+                    except Exception as gemini_err:
+                        # Google's direct Gemini API can return 503/overloaded. If an
+                        # OpenRouter key is configured, fall back to the same model via
+                        # OpenRouter (different infra). `prompt` embeds the schema.
+                        if not os.environ.get("OPENROUTER_API_KEY"):
+                            raise
+                        print(
+                            f"Gemini direct failed ({type(gemini_err).__name__}); "
+                            "falling back to OpenRouter for gemini-3-flash"
+                        )
+                        return await self._make_openrouter_request(
+                            SYSTEM_PROMPT, prompt, json_schema
+                        )
                 else:
                     print(f"Unknown model provider: {model_provider}")
                     raise RequestException(message=f"Unrecognized model provider: {model_provider}")
