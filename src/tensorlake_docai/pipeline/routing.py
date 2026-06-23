@@ -571,6 +571,13 @@ def route_after_ocr(parse_result: ParseResult, *, log_prefix: str, dots_ocr: boo
         Either a ``ParseResult`` (terminal OutputFormatter step) or a
         Tensorlake future from ``<Task>.run.future(parse_result)``.
     """
+    # GPU/CPU split: stop here and hand the OCR'd ParseResult back to the caller
+    # instead of dispatching the post-OCR DAG. Placed before the (GPU-free) lazy
+    # imports below so an OCR-only run never pulls VLM/SE/TableMerging modules.
+    if getattr(parse_result.request, "ocr_only", False):
+        print(f"🔀 {log_prefix} → OCR-only stop (ocr_only=True)")
+        return parse_result
+
     # Lazy imports — these modules import predicates from this file, so a
     # top-level import here would create a cycle.
     from tensorlake_docai.pipeline.output_formatter import format_final_output
