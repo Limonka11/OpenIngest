@@ -625,16 +625,29 @@ class StructuredExtraction:
     async def _make_openrouter_request(
         self, system_prompt: str, user_prompt: str, json_schema: Optional[dict] = None
     ) -> ModelResponse:
-        """Fallback path: run the same model via OpenRouter (OpenAI-compatible) when
-        Google's direct Gemini API is unavailable (503/overloaded). Uses JSON mode with
-        the schema embedded in the prompt (the caller passes the schema-bearing prompt),
-        so we avoid strict-schema conversion of complex schemas (oneOf, etc.)."""
+        """Run the same Gemini model via OpenRouter (OpenAI-compatible), matching the
+        Gemini-direct contract Document AI uses: the schema is ENFORCED via
+        response_format json_schema (OpenRouter forwards it to Gemini's native
+        responseSchema), and the caller passes the schema-less prompt. strict=False keeps
+        complex schemas (oneOf / optionals) working, as Gemini handles them natively.
+        Falls back to loose json_object only when no schema is supplied."""
         import openai
 
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise Exception("OPENROUTER_API_KEY not set; cannot fall back to OpenRouter")
         model_name = os.environ.get("OPENROUTER_GEMINI_MODEL", "google/gemini-3-flash-preview")
+        if json_schema:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_extraction",
+                    "strict": False,
+                    "schema": json_schema,
+                },
+            }
+        else:
+            response_format = {"type": "json_object"}
         start_time = time.time()
         client = openai.AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
         try:
@@ -646,7 +659,8 @@ class StructuredExtraction:
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.0,
-                    response_format={"type": "json_object"},
+                    max_tokens=64000,
+                    response_format=response_format,
                 )
             content = resp.choices[0].message.content or ""
             print(f"OpenRouter fallback response time: {time.time() - start_time:.2f}s")
@@ -858,13 +872,15 @@ class StructuredExtraction:
                 elif model_provider == "gemini":
                     # Google's direct Gemini API key is heavily 503/quota-limited in
                     # practice, while OpenRouter (same model) is reliable — so PREFER
-                    # OpenRouter when a key is configured (`prompt` embeds the schema),
-                    # and fall back to Gemini-direct if OpenRouter fails. Set
-                    # OPENROUTER_API_KEY="" to force Gemini-direct primary.
+                    # OpenRouter when a key is configured, and fall back to Gemini-direct
+                    # if OpenRouter fails. Set OPENROUTER_API_KEY="" to force Gemini-direct.
+                    # Pass the SAME schema-less prompt as Gemini-direct (`sonnet_prompt`);
+                    # the schema is enforced via response_format json_schema, matching
+                    # Document AI's contract (not loose json_object).
                     if os.environ.get("OPENROUTER_API_KEY"):
                         try:
                             return await self._make_openrouter_request(
-                                SYSTEM_PROMPT, prompt, json_schema
+                                SYSTEM_PROMPT, sonnet_prompt, json_schema
                             )
                         except Exception as or_err:
                             print(
