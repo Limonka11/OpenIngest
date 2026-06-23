@@ -661,6 +661,9 @@ class StructuredExtraction:
                     temperature=0.0,
                     max_tokens=64000,
                     response_format=response_format,
+                    # Match Gemini-direct's thinking_config=ThinkingLevel.LOW: OpenRouter
+                    # maps reasoning.effort → Gemini thinkingLevel (effort "low" = LOW).
+                    extra_body={"reasoning": {"effort": "low"}},
                 )
             content = resp.choices[0].message.content or ""
             print(f"OpenRouter fallback response time: {time.time() - start_time:.2f}s")
