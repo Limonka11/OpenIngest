@@ -30,6 +30,7 @@ from tensorlake_docai.prompts.dotsocr_prompts import (
 from tensorlake_docai.pipeline.api import PageFragmentType
 from tensorlake_docai.pipeline.routing import (
     pil_image_to_base64,
+    ocr_only_stop,
     should_route_to_table_merging,
     dots_ocr_should_go_to_output_formatter,
     dots_ocr_should_go_to_vlm_extraction,
@@ -646,6 +647,13 @@ class OvisFigureOCRTask(BatchProcessor):
         parse_result = self.run_batch_processing(ctx, parse_result, image_dimensions)
 
         print("✅ Figure OCR processing completed")
+
+        # GPU/CPU split: stop here too. Ovis has its own inlined routing (below) that
+        # does NOT go through route_after_ocr, so without this, figure-bearing docs
+        # bypass the ocr_only short-circuit and run the whole post-OCR DAG on the GPU.
+        stopped = ocr_only_stop(parse_result, "OvisFigureOCRTask")
+        if stopped is not None:
+            return stopped
 
         # Node-by-node routing decisions
         if should_route_to_table_merging(parse_result.request, parse_result):

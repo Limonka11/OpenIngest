@@ -357,6 +357,11 @@ class ParseRequest(BaseModel):
     page_classification_request: Optional[ClassificationRequest] = None
     structured_extraction_requests: Optional[List[StructuredExtractionRequest]] = None
     disable_layout_detection: Optional[bool] = False
+    # When True, the OCR backend returns the OCR'd ParseResult and the pipeline
+    # stops before the post-OCR DAG (TableMerging / classify / extract / format).
+    # Used by the GPU/CPU split so the GPU stage only ever runs OCR; the post-OCR
+    # stage resumes via ``resume_post_ocr_app``. Default False = unchanged behaviour.
+    ocr_only: bool = False
     table_summarization: Optional[bool] = False
     table_summarization_prompt: Optional[str] = None
     table_merging: bool = False

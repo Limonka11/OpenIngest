@@ -552,6 +552,25 @@ def should_route_to_table_merging(request, parse_result: ParseResult) -> bool:
     return True
 
 
+def ocr_only_stop(parse_result: ParseResult, log_prefix: str):
+    """GPU/CPU split: stop after OCR and return the OCR'd ParseResult instead of
+    dispatching the post-OCR DAG. Returns the ParseResult when request.ocr_only is set,
+    else None. base64-encodes the raw downloaded PDF bytes so the ParseResult survives
+    the app's JSON .output() boundary (the post-OCR VLM steps still need them;
+    resume_post_ocr_app decodes them back to bytes).
+
+    Must be called from EVERY OCR-terminal task (route_after_ocr AND OvisFigureOCRTask,
+    which has its own inlined routing) so figure-bearing docs don't bypass the split.
+    """
+    if not getattr(parse_result.request, "ocr_only", False):
+        return None
+    print(f"🔀 {log_prefix} → OCR-only stop (ocr_only=True)")
+    fb = parse_result.request.file_bytes
+    if isinstance(fb, (bytes, bytearray)):
+        parse_result.request.file_bytes = base64.b64encode(fb).decode("ascii")
+    return parse_result
+
+
 def route_after_ocr(parse_result: ParseResult, *, log_prefix: str, dots_ocr: bool = False):
     """Dispatch an OCR backend's output to the next pipeline step.
 
@@ -571,6 +590,13 @@ def route_after_ocr(parse_result: ParseResult, *, log_prefix: str, dots_ocr: boo
         Either a ``ParseResult`` (terminal OutputFormatter step) or a
         Tensorlake future from ``<Task>.run.future(parse_result)``.
     """
+    # GPU/CPU split: stop here and hand the OCR'd ParseResult back to the caller
+    # instead of dispatching the post-OCR DAG. Placed before the (GPU-free) lazy
+    # imports below so an OCR-only run never pulls VLM/SE/TableMerging modules.
+    stopped = ocr_only_stop(parse_result, log_prefix)
+    if stopped is not None:
+        return stopped
+
     # Lazy imports — these modules import predicates from this file, so a
     # top-level import here would create a cycle.
     from tensorlake_docai.pipeline.output_formatter import format_final_output

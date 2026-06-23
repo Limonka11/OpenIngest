@@ -625,16 +625,29 @@ class StructuredExtraction:
     async def _make_openrouter_request(
         self, system_prompt: str, user_prompt: str, json_schema: Optional[dict] = None
     ) -> ModelResponse:
-        """Fallback path: run the same model via OpenRouter (OpenAI-compatible) when
-        Google's direct Gemini API is unavailable (503/overloaded). Uses JSON mode with
-        the schema embedded in the prompt (the caller passes the schema-bearing prompt),
-        so we avoid strict-schema conversion of complex schemas (oneOf, etc.)."""
+        """Run the same Gemini model via OpenRouter (OpenAI-compatible), matching the
+        Gemini-direct contract Document AI uses: the schema is ENFORCED via
+        response_format json_schema (OpenRouter forwards it to Gemini's native
+        responseSchema), and the caller passes the schema-less prompt. strict=False keeps
+        complex schemas (oneOf / optionals) working, as Gemini handles them natively.
+        Falls back to loose json_object only when no schema is supplied."""
         import openai
 
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise Exception("OPENROUTER_API_KEY not set; cannot fall back to OpenRouter")
         model_name = os.environ.get("OPENROUTER_GEMINI_MODEL", "google/gemini-3-flash-preview")
+        if json_schema:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_extraction",
+                    "strict": False,
+                    "schema": json_schema,
+                },
+            }
+        else:
+            response_format = {"type": "json_object"}
         start_time = time.time()
         client = openai.AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
         try:
@@ -646,7 +659,11 @@ class StructuredExtraction:
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.0,
-                    response_format={"type": "json_object"},
+                    max_tokens=64000,
+                    response_format=response_format,
+                    # Match Gemini-direct's thinking_config=ThinkingLevel.LOW: OpenRouter
+                    # maps reasoning.effort → Gemini thinkingLevel (effort "low" = LOW).
+                    extra_body={"reasoning": {"effort": "low"}},
                 )
             content = resp.choices[0].message.content or ""
             print(f"OpenRouter fallback response time: {time.time() - start_time:.2f}s")
@@ -856,28 +873,26 @@ class StructuredExtraction:
                         SYSTEM_PROMPT, sonnet_prompt, json_schema
                     )
                 elif model_provider == "gemini":
-                    # Google's direct Gemini API key is heavily 503/quota-limited in
-                    # practice, while OpenRouter (same model) is reliable — so PREFER
-                    # OpenRouter when a key is configured (`prompt` embeds the schema),
-                    # and fall back to Gemini-direct if OpenRouter fails. Set
-                    # OPENROUTER_API_KEY="" to force Gemini-direct primary.
-                    if os.environ.get("OPENROUTER_API_KEY"):
-                        try:
-                            return await self._make_openrouter_request(
-                                SYSTEM_PROMPT, prompt, json_schema
-                            )
-                        except Exception as or_err:
+                    # EXACTLY as upstream OpenIngest / Document AI: Gemini-direct with
+                    # Gemini's NATIVE response_json_schema (handles oneOf/optionals; no
+                    # OpenAI-strict constraints). OpenRouter is OUR addition (not in
+                    # upstream) and only a fallback when Google's API fails (503/quota) —
+                    # so the default path is byte-faithful to Document AI. Set
+                    # OPENROUTER_API_KEY to enable the fallback.
+                    try:
+                        return await self._make_gemini_request(
+                            SYSTEM_PROMPT, sonnet_prompt, json_schema
+                        )
+                    except Exception as gem_err:
+                        if os.environ.get("OPENROUTER_API_KEY"):
                             print(
-                                f"OpenRouter failed ({type(or_err).__name__}); "
-                                "falling back to Gemini direct"
+                                f"Gemini-direct failed ({type(gem_err).__name__}); "
+                                "falling back to OpenRouter"
                             )
-                            return await self._make_gemini_request(
+                            return await self._make_openrouter_request(
                                 SYSTEM_PROMPT, sonnet_prompt, json_schema
                             )
-                    # No OpenRouter key: use Gemini direct (native response_json_schema).
-                    return await self._make_gemini_request(
-                        SYSTEM_PROMPT, sonnet_prompt, json_schema
-                    )
+                        raise
                 else:
                     print(f"Unknown model provider: {model_provider}")
                     raise RequestException(message=f"Unrecognized model provider: {model_provider}")
