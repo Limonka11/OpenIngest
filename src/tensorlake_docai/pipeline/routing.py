@@ -576,6 +576,13 @@ def route_after_ocr(parse_result: ParseResult, *, log_prefix: str, dots_ocr: boo
     # imports below so an OCR-only run never pulls VLM/SE/TableMerging modules.
     if getattr(parse_result.request, "ocr_only", False):
         print(f"🔀 {log_prefix} → OCR-only stop (ocr_only=True)")
+        # normalize() leaves the raw downloaded PDF bytes on request.file_bytes.
+        # They are needed by the post-OCR VLM steps (page-image rendering) so we
+        # cannot drop them — but raw bytes break the app's JSON .output() boundary.
+        # base64-encode for transport; resume_post_ocr_app decodes back to bytes.
+        fb = parse_result.request.file_bytes
+        if isinstance(fb, (bytes, bytearray)):
+            parse_result.request.file_bytes = base64.b64encode(fb).decode("ascii")
         return parse_result
 
     # Lazy imports — these modules import predicates from this file, so a

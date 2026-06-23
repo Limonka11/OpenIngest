@@ -71,6 +71,16 @@ def resume_post_ocr_app(parse_result: dict) -> dict:
     # Clear the OCR-only flag so route_after_ocr resumes the DAG instead of
     # short-circuiting again.
     pr.request.ocr_only = False
+    # The OCR-only seam base64-encoded the raw PDF bytes so they survived the JSON
+    # output boundary; decode them back so the VLM steps can render page images.
+    fb = pr.request.file_bytes
+    if isinstance(fb, str) and fb:
+        import base64
+
+        try:
+            pr.request.file_bytes = base64.b64decode(fb)
+        except Exception:
+            pass  # not base64 (e.g. caller-supplied text); leave as-is
     return route_after_ocr(
         pr,
         log_prefix="RESUME_POST_OCR",

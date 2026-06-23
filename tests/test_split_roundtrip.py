@@ -54,6 +54,31 @@ def test_ocr_only_flag_defaults_false_and_survives_roundtrip():
     assert restored.request.ocr_only is True
 
 
+def test_raw_file_bytes_break_json_but_base64_transport_roundtrips():
+    """normalize() leaves raw PDF bytes on request.file_bytes; raw bytes break the
+    JSON output boundary, so the OCR-only seam base64-encodes them and resume decodes
+    them back. Lock that contract (pydantic-only, runs locally)."""
+    import base64
+    import pytest
+
+    raw = b"%PDF-1.3\n\xaa\xab\xac\xad binary"
+    pr = _ocrd_parse_result()
+    pr.request.file_bytes = raw  # what normalize() leaves on the request
+
+    # Raw bytes on a str-typed field can't be JSON-serialized (the observed failure).
+    with pytest.raises(Exception):
+        pr.model_dump_json()
+
+    # Seam transform: bytes -> base64 str.
+    pr.request.file_bytes = base64.b64encode(raw).decode("ascii")
+    dumped = pr.model_dump_json()  # now JSON-safe
+    assert isinstance(dumped, str)
+
+    # Resume transform: base64 str -> original bytes.
+    restored = ParseResult.model_validate_json(dumped)
+    assert base64.b64decode(restored.request.file_bytes) == raw
+
+
 def test_route_after_ocr_short_circuits_when_ocr_only(pytestconfig):
     """With ocr_only=True, route_after_ocr returns the OCR'd ParseResult and does
     NOT dispatch the post-OCR DAG. Needs the full dependency env (boto3/tensorlake),
