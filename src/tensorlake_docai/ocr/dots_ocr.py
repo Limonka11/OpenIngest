@@ -43,6 +43,90 @@ MEMORY_IN_GB = int(os.getenv("OCR_GPU_MEMORY_IN_GB", "32"))
 GPU_MODELS = ["H100", "A100-80GB"]
 
 
+# ---------------------------------------------------------------------------
+# Module-global dots.ocr vLLM engine singleton.
+#
+# The vLLM engine is built ONCE per process and stored here. Every DotsOCRTask
+# instance adopts this shared engine instead of constructing its own (a fresh
+# build is a ~800s load), and the engine can be put to sleep / woken between
+# requests (level-1 sleep frees VRAM while keeping the engine resident) so a
+# co-resident model (e.g. Ovis figure OCR) can use the GPU in the meantime.
+# ---------------------------------------------------------------------------
+_DOTS_OCR_ENGINE = None
+_DOTS_OCR_TOKENIZER = None
+_DOTS_OCR_SAMPLING_PARAMS = None
+_DOTS_OCR_MODEL_DIR = None
+
+
+def _download_model_dir():
+    """Download the DotsOCR1.5 model from Hugging Face Hub if needed.
+
+    Module-level so it can be shared by the engine builder and patched in tests.
+    """
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(repo_id="rednote-hilab/dots.mocr")
+
+
+def build_dots_ocr_engine(gpu_memory_utilization=None):
+    """Build the dots.ocr vLLM engine ONCE into module globals.
+
+    Idempotent: returns immediately if the engine already exists. Carries the
+    exact engine kwargs used by ``DotsOCRTask`` and additionally enables
+    ``enable_sleep_mode`` so the engine can be slept/woken between requests.
+    """
+    global _DOTS_OCR_ENGINE, _DOTS_OCR_TOKENIZER, _DOTS_OCR_SAMPLING_PARAMS
+    global _DOTS_OCR_MODEL_DIR
+
+    if _DOTS_OCR_ENGINE is not None:
+        return
+
+    if gpu_memory_utilization is None:
+        gpu_memory_utilization = OCR_GPU_MEMORY_UTILIZATION
+
+    from vllm import SamplingParams, LLM
+    from transformers import AutoTokenizer
+
+    model_dir = _download_model_dir()
+    print(f"Initializing DotsOCR1.5 from: {model_dir}")
+
+    _DOTS_OCR_ENGINE = LLM(
+        model=model_dir,
+        trust_remote_code=True,
+        download_dir=model_dir,
+        dtype="bfloat16",
+        max_model_len=28800,
+        gpu_memory_utilization=gpu_memory_utilization,
+        max_num_batched_tokens=32768,
+        enable_chunked_prefill=True,
+        max_num_seqs=64,
+        limit_mm_per_prompt={"image": 1},
+        enable_sleep_mode=True,
+    )
+
+    _DOTS_OCR_TOKENIZER = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+
+    _DOTS_OCR_SAMPLING_PARAMS = SamplingParams(
+        temperature=0.1,
+        top_p=1.0,
+        max_tokens=16384,
+    )
+
+    _DOTS_OCR_MODEL_DIR = model_dir
+
+
+def sleep_dots_ocr_engine():
+    """Put the shared dots.ocr engine to sleep (level 1: frees VRAM, keeps engine)."""
+    if _DOTS_OCR_ENGINE is not None:
+        _DOTS_OCR_ENGINE.sleep(level=1)
+
+
+def wake_dots_ocr_engine():
+    """Wake the shared dots.ocr engine after a sleep."""
+    if _DOTS_OCR_ENGINE is not None:
+        _DOTS_OCR_ENGINE.wake_up()
+
+
 @cls()
 class DotsOCRTask(BatchProcessor):
     def __init__(self):
@@ -57,7 +141,7 @@ class DotsOCRTask(BatchProcessor):
         self.tokenizer = None
 
     def _initialize_local_model(self):
-        """Initialize the local vLLM instance on GPU."""
+        """Adopt the module-global vLLM engine (build it once if needed)."""
         if self.llm is not None:
             return
 
@@ -74,41 +158,20 @@ class DotsOCRTask(BatchProcessor):
                 f"GPU memory before model load: {free_mem / 1024**3:.2f} GiB free / {total_mem / 1024**3:.2f} GiB total"
             )
 
-        self.model_dir = self._download_model()
+        # Build the shared engine once into module globals, then adopt it. This
+        # avoids a second ~800s engine load per task instance.
+        build_dots_ocr_engine()
 
-        from vllm import SamplingParams, LLM
-        from transformers import AutoTokenizer
-
-        print(f"Initializing DotsOCR1.5 from: {self.model_dir}")
-
-        self.llm = LLM(
-            model=self.model_dir,
-            trust_remote_code=True,
-            download_dir=self.model_dir,
-            dtype="bfloat16",
-            max_model_len=28800,
-            gpu_memory_utilization=OCR_GPU_MEMORY_UTILIZATION,
-            max_num_batched_tokens=32768,
-            enable_chunked_prefill=True,
-            max_num_seqs=64,
-            limit_mm_per_prompt={"image": 1},
-        )
-
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_dir, trust_remote_code=True)
-
-        self.sampling_params = SamplingParams(
-            temperature=0.1,
-            top_p=1.0,
-            max_tokens=16384,
-        )
+        self.llm = _DOTS_OCR_ENGINE
+        self.tokenizer = _DOTS_OCR_TOKENIZER
+        self.sampling_params = _DOTS_OCR_SAMPLING_PARAMS
+        self.model_dir = _DOTS_OCR_MODEL_DIR
 
         print("✅ DotsOCR1.5 model initialized successfully (GPU)")
 
     def _download_model(self):
         """Download the DotsOCR1.5 model from Hugging Face Hub if needed."""
-        from huggingface_hub import snapshot_download
-
-        return snapshot_download(repo_id="rednote-hilab/dots.mocr")
+        return _download_model_dir()
 
     def _check_repetition_during_generation(self, current_text: str, context: str = "") -> bool:
         """

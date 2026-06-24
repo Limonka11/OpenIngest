@@ -31,3 +31,19 @@ def resolve_ocr_backend(ocr_model: Optional[str]):
     spec = OCR_BACKENDS.get(ocr_model or DEFAULT_OCR_MODEL, OCR_BACKENDS[DEFAULT_OCR_MODEL])
     module_path, attr = spec.rsplit(".", 1)
     return getattr(import_module(module_path), attr)
+
+
+# Re-export the dots.ocr module-global engine helpers. Resolved lazily via
+# PEP 562 ``__getattr__`` so importing this package does NOT eagerly import
+# ``dots_ocr`` (which pulls in heavyweight CUDA deps at module load).
+_DOTS_OCR_ENGINE_HELPERS = (
+    "build_dots_ocr_engine",
+    "sleep_dots_ocr_engine",
+    "wake_dots_ocr_engine",
+)
+
+
+def __getattr__(name: str):
+    if name in _DOTS_OCR_ENGINE_HELPERS:
+        return getattr(import_module("tensorlake_docai.ocr.dots_ocr"), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
