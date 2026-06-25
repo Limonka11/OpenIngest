@@ -114,7 +114,7 @@ def resume_post_ocr_app(parse_result: dict) -> dict:
     gpu=["H100", "A100-80GB"],
     retries=Retries(max_retries=2),
 )
-def run_ovis_app(parse_result: dict) -> "ParseResult | dict":
+def run_ovis_app(parse_result: dict) -> ParseResult | dict:
     """Run Ovis figure OCR in isolation on a dots-ocr'd ParseResult, then stop.
 
     The dots stage (``defer_ovis=True``) returned the ParseResult with figure regions
