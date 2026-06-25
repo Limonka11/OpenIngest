@@ -68,12 +68,17 @@ def _download_model_dir():
     return snapshot_download(repo_id="rednote-hilab/dots.mocr")
 
 
-def build_dots_ocr_engine(gpu_memory_utilization=None):
+def build_dots_ocr_engine(gpu_memory_utilization=None, enforce_eager=False):
     """Build the dots.ocr vLLM engine ONCE into module globals.
 
     Idempotent: returns immediately if the engine already exists. Carries the
     exact engine kwargs used by ``DotsOCRTask`` and additionally enables
     ``enable_sleep_mode`` so the engine can be slept/woken between requests.
+
+    ``enforce_eager=True`` disables CUDA graph capture. The Modal GPU memory
+    snapshot path uses this because captured CUDA graphs leave live GPU state
+    that the snapshotter cannot capture cleanly; output is unchanged, decode is
+    marginally slower. The normal (warm-pool) path leaves it False for speed.
     """
     global _DOTS_OCR_ENGINE, _DOTS_OCR_TOKENIZER, _DOTS_OCR_SAMPLING_PARAMS
     global _DOTS_OCR_MODEL_DIR
@@ -102,6 +107,7 @@ def build_dots_ocr_engine(gpu_memory_utilization=None):
         max_num_seqs=64,
         limit_mm_per_prompt={"image": 1},
         enable_sleep_mode=True,
+        enforce_eager=enforce_eager,
     )
 
     _DOTS_OCR_TOKENIZER = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
